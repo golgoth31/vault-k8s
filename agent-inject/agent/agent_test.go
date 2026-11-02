@@ -4,9 +4,12 @@
 package agent
 
 import (
+	"encoding/json"
 	"testing"
 
+	jsonpatch "github.com/evanphx/json-patch"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -650,4 +653,181 @@ func TestValidateNativeSidecar(t *testing.T) {
 			assert.NoError(t, a.Validate())
 		})
 	}
+}
+
+func buildNativePatchAgent(t *testing.T, annotations map[string]string, initContainers []corev1.Container) (*corev1.Pod, *Agent) {
+	t.Helper()
+	pod := goldenPod(annotations, initContainers)
+	require.NoError(t, Init(pod, goldenAgentConfig()))
+	agent, err := New(pod)
+	require.NoError(t, err)
+	require.NoError(t, agent.Validate())
+	return pod, agent
+}
+
+func patchedPod(t *testing.T, annotations map[string]string, initContainers []corev1.Container) (*corev1.Pod, *Agent) {
+	t.Helper()
+	pod, agent := buildNativePatchAgent(t, annotations, initContainers)
+	raw, err := agent.Patch()
+	require.NoError(t, err)
+	ops, err := jsonpatch.DecodePatch(raw)
+	require.NoError(t, err)
+	podJSON, err := json.Marshal(pod)
+	require.NoError(t, err)
+	patched, err := ops.Apply(podJSON)
+	require.NoError(t, err)
+	var out corev1.Pod
+	require.NoError(t, json.Unmarshal(patched, &out))
+	return &out, agent
+}
+
+func nativeOn(extra map[string]string) map[string]string {
+	annotations := map[string]string{AnnotationAgentNativeSidecar: "true"}
+	for k, v := range extra {
+		annotations[k] = v
+	}
+	return annotations
+}
+
+func containerNames(containers []corev1.Container) []string {
+	names := []string{}
+	for _, c := range containers {
+		names = append(names, c.Name)
+	}
+	return names
+}
+
+func volumeNames(volumes []corev1.Volume) []string {
+	names := []string{}
+	for _, v := range volumes {
+		names = append(names, v.Name)
+	}
+	return names
+}
+
+func findContainer(t *testing.T, containers []corev1.Container, name string) corev1.Container {
+	t.Helper()
+	for _, c := range containers {
+		if c.Name == name {
+			return c
+		}
+	}
+	t.Fatalf("container %q not found in %v", name, containerNames(containers))
+	return corev1.Container{}
+}
+
+func hasSecretMount(c corev1.Container) bool {
+	for _, m := range c.VolumeMounts {
+		if m.Name == secretVolumeName && m.MountPath == "/vault/secrets" {
+			return true
+		}
+	}
+	return false
+}
+
+func requireUniqueMountPaths(t *testing.T, c corev1.Container) {
+	t.Helper()
+	seen := map[string]string{}
+	for _, m := range c.VolumeMounts {
+		if prev, ok := seen[m.MountPath]; ok {
+			t.Fatalf("container %q mounts %q twice (volumes %q and %q)", c.Name, m.MountPath, prev, m.Name)
+		}
+		seen[m.MountPath] = m.Name
+	}
+}
+
+func TestPatchNativeSidecar(t *testing.T) {
+	t.Run("AC3 single native sidecar in initContainers", func(t *testing.T) {
+		pod, _ := patchedPod(t, nativeOn(nil), nil)
+
+		require.Equal(t, []string{"vault-agent"}, containerNames(pod.Spec.InitContainers))
+		require.Equal(t, []string{"app", "other"}, containerNames(pod.Spec.Containers))
+		require.Contains(t, volumeNames(pod.Spec.Volumes), "home-sidecar")
+		require.NotContains(t, volumeNames(pod.Spec.Volumes), "home-init")
+
+		agentContainer := findContainer(t, pod.Spec.InitContainers, "vault-agent")
+		requireNativeShape(t, agentContainer)
+		requireProbeCommand(t, agentContainer, "/vault/secrets/db")
+		require.Equal(t, false, decodedVaultConfig(t, agentContainer)["exit_after_auth"])
+		require.True(t, hasSecretMount(agentContainer), "native agent must mount the secret volume it renders into")
+		requireUniqueMountPaths(t, agentContainer)
+
+		require.True(t, hasSecretMount(findContainer(t, pod.Spec.Containers, "app")), "app must get the secret volume mount")
+	})
+
+	t.Run("AC6 user init container then native sidecar", func(t *testing.T) {
+		pod, _ := patchedPod(t, nativeOn(nil), setupInitContainer())
+
+		require.Equal(t, []string{"setup", "vault-agent"}, containerNames(pod.Spec.InitContainers))
+		require.Equal(t, []string{"app", "other"}, containerNames(pod.Spec.Containers))
+		require.True(t, hasSecretMount(findContainer(t, pod.Spec.InitContainers, "setup")), "setup must get the secret volume mount")
+		agentContainer := findContainer(t, pod.Spec.InitContainers, "vault-agent")
+		requireNativeShape(t, agentContainer)
+		requireUniqueMountPaths(t, agentContainer)
+	})
+
+	t.Run("AC5 init-first native sidecar before user init container (Review Focus 3)", func(t *testing.T) {
+		pod, _ := patchedPod(t, nativeOn(map[string]string{AnnotationAgentInitFirst: "true"}), setupInitContainer())
+
+		require.Equal(t, []string{"vault-agent", "setup"}, containerNames(pod.Spec.InitContainers))
+		require.Equal(t, []string{"app", "other"}, containerNames(pod.Spec.Containers))
+		require.True(t, hasSecretMount(findContainer(t, pod.Spec.InitContainers, "setup")), "setup must get the secret volume mount")
+		agentContainer := findContainer(t, pod.Spec.InitContainers, "vault-agent")
+		requireNativeShape(t, agentContainer)
+		requireUniqueMountPaths(t, agentContainer)
+	})
+
+	t.Run("AC15 cache enabled without persistent cache (Review Focus 5)", func(t *testing.T) {
+		annotations := map[string]string{AnnotationAgentCacheEnable: "true"}
+		pod, agent := patchedPod(t, nativeOn(annotations), nil)
+		require.False(t, agent.VaultAgentCache.Persist)
+		require.NotContains(t, volumeNames(pod.Spec.Volumes), cacheVolumeName)
+
+		agentContainer := findContainer(t, pod.Spec.InitContainers, "vault-agent")
+		for _, m := range agentContainer.VolumeMounts {
+			require.NotEqual(t, cacheVolumeName, m.Name)
+		}
+		cfg := decodedVaultConfig(t, agentContainer)
+		require.NotEmpty(t, cfg["listener"], "native config must carry the cache listener")
+		cache, ok := cfg["cache"].(map[string]any)
+		require.True(t, ok, "native config must carry a cache stanza")
+		require.Contains(t, cache, "use_auto_auth_token")
+		require.NotContains(t, cache, "persist")
+
+		todayPod, _ := patchedPod(t, annotations, nil)
+		todayCfg := decodedVaultConfig(t, findContainer(t, todayPod.Spec.Containers, "vault-agent"))
+		require.Equal(t, todayCfg["listener"], cfg["listener"], "listener configured as for today's sidecar")
+		require.Equal(t, todayCfg["cache"].(map[string]any)["use_auto_auth_token"], cache["use_auto_auth_token"])
+	})
+
+	t.Run("AC11b guard agent-json-patch removing restartPolicy fails Patch", func(t *testing.T) {
+		_, agent := buildNativePatchAgent(t, nativeOn(map[string]string{
+			AnnotationAgentJsonPatch: `[{"op":"remove","path":"/restartPolicy"}]`,
+		}), nil)
+		_, err := agent.Patch()
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "restartPolicy")
+	})
+
+	t.Run("AC17 guard shareProcessNamespace patched", func(t *testing.T) {
+		pod, _ := patchedPod(t, nativeOn(map[string]string{AnnotationAgentShareProcessNamespace: "true"}), nil)
+		require.NotNil(t, pod.Spec.ShareProcessNamespace)
+		require.True(t, *pod.Spec.ShareProcessNamespace)
+	})
+
+	t.Run("AC18 guard inject-containers limits secret mounts", func(t *testing.T) {
+		pod, _ := patchedPod(t, nativeOn(map[string]string{AnnotationAgentInjectContainers: "app"}), nil)
+		require.True(t, hasSecretMount(findContainer(t, pod.Spec.Containers, "app")), "app must get the secret volume mount")
+		require.False(t, hasSecretMount(findContainer(t, pod.Spec.Containers, "other")), "other must not get the secret volume mount")
+	})
+
+	t.Run("AC2 guard native false patch equals annotation absent", func(t *testing.T) {
+		_, absent := buildNativePatchAgent(t, nil, nil)
+		_, off := buildNativePatchAgent(t, map[string]string{AnnotationAgentNativeSidecar: "false"}, nil)
+		absentPatch, err := absent.Patch()
+		require.NoError(t, err)
+		offPatch, err := off.Patch()
+		require.NoError(t, err)
+		require.Equal(t, string(normalisePatch(t, absentPatch)), string(normalisePatch(t, offPatch)))
+	})
 }

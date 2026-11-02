@@ -70,7 +70,7 @@ func (a *Agent) ContainerVolumes() []corev1.Volume {
 // home directory where the token sink will write to.
 func (a *Agent) ContainerTokenVolume() []corev1.Volume {
 	var vols []corev1.Volume
-	if a.PrePopulate {
+	if a.PrePopulate && !a.NativeSidecar {
 		initVol := corev1.Volume{
 			Name: tokenVolumeNameInit,
 			VolumeSource: corev1.VolumeSource{

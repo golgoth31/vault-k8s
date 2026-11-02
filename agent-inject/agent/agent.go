@@ -670,7 +670,11 @@ func (a *Agent) Patch() ([]byte, error) {
 
 	// Init Container
 	if a.PrePopulate {
-		container, err := a.ContainerInitSidecar()
+		initSidecar := a.ContainerInitSidecar
+		if a.NativeSidecar {
+			initSidecar = a.ContainerSidecar
+		}
+		container, err := initSidecar()
 		if err != nil {
 			return nil, err
 		}
@@ -704,7 +708,7 @@ func (a *Agent) Patch() ([]byte, error) {
 
 		// Add Volume Mounts
 		for i, container := range containers {
-			if container.Name == "vault-agent-init" {
+			if container.Name == "vault-agent-init" || (a.NativeSidecar && container.Name == "vault-agent") {
 				continue
 			}
 			patches = append(patches, addVolumeMounts(
@@ -720,7 +724,7 @@ func (a *Agent) Patch() ([]byte, error) {
 	}
 
 	// Sidecar Container
-	if !a.PrePopulateOnly {
+	if !a.PrePopulateOnly && !a.NativeSidecar {
 		container, err := a.ContainerSidecar()
 		if err != nil {
 			return nil, err
