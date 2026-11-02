@@ -575,3 +575,79 @@ func Test_serviceaccount(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateNativeSidecar(t *testing.T) {
+	baseAgent := func(native bool) Agent {
+		return Agent{
+			Namespace: "test",
+			ServiceAccountTokenVolume: &ServiceAccountTokenVolume{
+				Name:      "foobar",
+				MountPath: "foobar",
+				TokenPath: "foobar",
+			},
+			ImageName: "test",
+			Vault: Vault{
+				Role:     "test",
+				Address:  "https://foobar.com:8200",
+				AuthPath: "test",
+				AuthType: "kubernetes",
+			},
+			NativeSidecar: native,
+			PrePopulate:   true,
+		}
+	}
+
+	t.Run("native base is valid", func(t *testing.T) {
+		a := baseAgent(true)
+		assert.NoError(t, a.Validate())
+	})
+
+	tests := map[string]struct {
+		mutate     func(a *Agent)
+		annotation string
+	}{
+		"AC7 pre-populate false": {
+			mutate:     func(a *Agent) { a.PrePopulate = false },
+			annotation: "agent-pre-populate",
+		},
+		"AC8 pre-populate-only true": {
+			mutate:     func(a *Agent) { a.PrePopulateOnly = true },
+			annotation: "agent-pre-populate-only",
+		},
+		"AC9 configmap set": {
+			mutate:     func(a *Agent) { a.ConfigMapName = "cm" },
+			annotation: "agent-configmap",
+		},
+		"AC10 init-json-patch set": {
+			mutate:     func(a *Agent) { a.InitJsonPatch = "[]" },
+			annotation: "agent-init-json-patch",
+		},
+		"AC19 inject-command set": {
+			mutate: func(a *Agent) {
+				a.Secrets = []*Secret{{Name: "db", Path: "secret/db", Command: "echo"}}
+			},
+			annotation: "agent-inject-command",
+		},
+		"AC20 enable-quit true": {
+			mutate:     func(a *Agent) { a.EnableQuit = true },
+			annotation: "agent-enable-quit",
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name+" native rejected", func(t *testing.T) {
+			a := baseAgent(true)
+			tc.mutate(&a)
+			err := a.Validate()
+			if assert.Error(t, err) {
+				assert.Contains(t, err.Error(), "agent-native-sidecar")
+				assert.Contains(t, err.Error(), tc.annotation)
+			}
+		})
+		t.Run(name+" guard non-native accepted", func(t *testing.T) {
+			a := baseAgent(false)
+			tc.mutate(&a)
+			assert.NoError(t, a.Validate())
+		})
+	}
+}

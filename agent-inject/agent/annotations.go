@@ -118,6 +118,10 @@ const (
 	// to run when a pod starts. Default is last.
 	AnnotationAgentInitFirst = "vault.hashicorp.com/agent-init-first"
 
+	// AnnotationAgentNativeSidecar injects one native sidecar instead of an init container plus a sidecar.
+	// Needs native sidecars (Kubernetes >= 1.29) on API server and nodes, else the pod is rejected.
+	AnnotationAgentNativeSidecar = "vault.hashicorp.com/agent-native-sidecar"
+
 	// AnnotationAgentPrePopulate controls whether an init container is included
 	// to pre-populate the shared memory volume with secrets prior to the application
 	// starting.
@@ -717,6 +721,15 @@ func (a *Agent) inject() (bool, error) {
 
 func (a *Agent) initFirst() (bool, error) {
 	raw, ok := a.Annotations[AnnotationAgentInitFirst]
+	if !ok {
+		return false, nil
+	}
+
+	return parseutil.ParseBool(raw)
+}
+
+func (a *Agent) nativeSidecar() (bool, error) {
+	raw, ok := a.Annotations[AnnotationAgentNativeSidecar]
 	if !ok {
 		return false, nil
 	}

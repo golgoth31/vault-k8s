@@ -86,6 +86,8 @@ type Agent struct {
 	// added to the request.
 	PrePopulateOnly bool
 
+	NativeSidecar bool
+
 	// RevokeOnShutdown controls whether a sidecar container will attempt to revoke its Vault
 	// token on shutting down.
 	RevokeOnShutdown bool
@@ -445,6 +447,11 @@ func New(pod *corev1.Pod) (*Agent, error) {
 		return agent, err
 	}
 
+	agent.NativeSidecar, err = agent.nativeSidecar()
+	if err != nil {
+		return agent, err
+	}
+
 	agent.RevokeOnShutdown, err = agent.revokeOnShutdown()
 	if err != nil {
 		return agent, err
@@ -772,6 +779,35 @@ func (a *Agent) Validate() error {
 			return errors.New("no Vault address found")
 		}
 	}
+
+	if a.NativeSidecar {
+		if !a.PrePopulate {
+			return fmt.Errorf("%s requires %s to be true", AnnotationAgentNativeSidecar, AnnotationAgentPrePopulate)
+		}
+
+		if a.PrePopulateOnly {
+			return fmt.Errorf("%s cannot be combined with %s", AnnotationAgentNativeSidecar, AnnotationAgentPrePopulateOnly)
+		}
+
+		if a.ConfigMapName != "" {
+			return fmt.Errorf("%s cannot be combined with %s", AnnotationAgentNativeSidecar, AnnotationAgentConfigMap)
+		}
+
+		if a.InitJsonPatch != "" {
+			return fmt.Errorf("%s cannot be combined with %s", AnnotationAgentNativeSidecar, AnnotationAgentInitJsonPatch)
+		}
+
+		for _, s := range a.Secrets {
+			if s.Command != "" {
+				return fmt.Errorf("%s cannot be combined with %s", AnnotationAgentNativeSidecar, AnnotationAgentInjectCommand)
+			}
+		}
+
+		if a.EnableQuit {
+			return fmt.Errorf("%s cannot be combined with %s", AnnotationAgentNativeSidecar, AnnotationAgentEnableQuit)
+		}
+	}
+
 	return nil
 }
 
