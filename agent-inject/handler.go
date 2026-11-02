@@ -174,9 +174,10 @@ func (h *Handler) Handle(w http.ResponseWriter, r *http.Request) {
 }
 
 type MutateResponse struct {
-	Resp            *admissionv1.AdmissionResponse
-	InjectedInit    bool
-	InjectedSidecar bool
+	Resp                  *admissionv1.AdmissionResponse
+	InjectedInit          bool
+	InjectedSidecar       bool
+	InjectedNativeSidecar bool
 }
 
 // Mutate takes an admission request and performs mutation if necessary,
@@ -284,9 +285,10 @@ func (h *Handler) Mutate(req *admissionv1.AdmissionRequest) MutateResponse {
 	resp.PatchType = &patchType
 
 	return MutateResponse{
-		Resp:            resp,
-		InjectedInit:    agentSidecar.PrePopulate,
-		InjectedSidecar: !agentSidecar.PrePopulateOnly,
+		Resp:                  resp,
+		InjectedInit:          agentSidecar.PrePopulate && !agentSidecar.NativeSidecar,
+		InjectedSidecar:       !agentSidecar.PrePopulateOnly && !agentSidecar.NativeSidecar,
+		InjectedNativeSidecar: agentSidecar.NativeSidecar,
 	}
 }
 

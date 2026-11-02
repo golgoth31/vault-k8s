@@ -8,13 +8,14 @@ import (
 )
 
 const (
-	metricsNamespace            = "vault"
-	metricsSubsystem            = "agent_injector"
-	metricsLabelNamespace       = "namespace"
-	metricsLabelType            = "injection_type"
-	metricsLabelTypeBoth        = "init_and_sidecar"
-	metricsLabelTypeInitOnly    = "init_only"
-	metricsLabelTypeSidecarOnly = "sidecar_only"
+	metricsNamespace              = "vault"
+	metricsSubsystem              = "agent_injector"
+	metricsLabelNamespace         = "namespace"
+	metricsLabelType              = "injection_type"
+	metricsLabelTypeBoth          = "init_and_sidecar"
+	metricsLabelTypeInitOnly      = "init_only"
+	metricsLabelTypeSidecarOnly   = "sidecar_only"
+	metricsLabelTypeNativeSidecar = "native_sidecar"
 )
 
 var (
@@ -49,11 +50,19 @@ var (
 )
 
 func incrementInjections(namespace string, res MutateResponse) {
+	if res.InjectedNativeSidecar {
+		injectionsByNamespace.With(prometheus.Labels{
+			metricsLabelNamespace: namespace,
+			metricsLabelType:      metricsLabelTypeNativeSidecar,
+		}).Inc()
+		return
+	}
+
 	if !res.InjectedInit && !res.InjectedSidecar {
 		return
 	}
 
-	// Injection type can be one of: init_and_sidecar (default); init_only; or sidecar_only
+	// Injection type can be one of: init_and_sidecar (default); init_only; sidecar_only; or native_sidecar
 	typeLabel := metricsLabelTypeBoth
 	if res.InjectedInit && !res.InjectedSidecar {
 		typeLabel = metricsLabelTypeInitOnly
