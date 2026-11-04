@@ -33,18 +33,15 @@ const (
 )
 
 func (a *Agent) startupProbe() *corev1.Probe {
-	var paths []string
+	paths := []string{TokenFile}
 	for _, t := range a.newTemplateConfigs() {
 		paths = append(paths, t.Destination)
 	}
 	if a.InjectToken {
 		paths = append(paths, path.Join(a.Annotations[AnnotationVaultSecretVolumePath], "token"))
 	}
-	if len(paths) == 0 {
-		return nil
-	}
 	sort.Strings(paths)
-	command := append([]string{"/bin/sh", "-c", "for f in \"$@\"; do test -f \"$f\" || exit 1; done", "startup-probe"}, paths...)
+	command := append([]string{"/bin/sh", "-c", "for f in \"$@\"; do test -f \"$f\" || { echo \"startup-probe: missing $f\" >&2; exit 1; }; done", "startup-probe"}, paths...)
 	return &corev1.Probe{
 		ProbeHandler: corev1.ProbeHandler{
 			Exec: &corev1.ExecAction{Command: command},

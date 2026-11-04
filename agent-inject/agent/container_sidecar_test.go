@@ -4,9 +4,13 @@
 package agent
 
 import (
+	"bytes"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strconv"
 	"testing"
 
@@ -1481,7 +1485,7 @@ func optional[T any](x T) *T {
 	return &x
 }
 
-const nativeProbeScript = "for f in \"$@\"; do test -f \"$f\" || exit 1; done"
+const nativeProbeScript = "for f in \"$@\"; do test -f \"$f\" || { echo \"startup-probe: missing $f\" >&2; exit 1; }; done"
 
 func nativeProbeCommand(paths ...string) []string {
 	return append([]string{"/bin/sh", "-c", nativeProbeScript, "startup-probe"}, paths...)
@@ -1547,7 +1551,7 @@ func TestContainerSidecarNative(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, "vault-agent", container.Name)
 		requireNativeShape(t, container)
-		requireProbeCommand(t, container, "/vault/secrets/db")
+		requireProbeCommand(t, container, "/home/vault/.vault-token", "/vault/secrets/db")
 		assert.Equal(t, int32(1), container.StartupProbe.PeriodSeconds)
 		assert.Equal(t, int32(300), container.StartupProbe.FailureThreshold)
 		cfg := decodedVaultConfig(t, container)
@@ -1562,7 +1566,7 @@ func TestContainerSidecarNative(t *testing.T) {
 		}))
 		require.NoError(t, err)
 		requireNativeShape(t, container)
-		requireProbeCommand(t, container, "/vault/secrets/db", "/vault/secrets/token")
+		requireProbeCommand(t, container, "/home/vault/.vault-token", "/vault/secrets/db", "/vault/secrets/token")
 	})
 
 	t.Run("AC14_custom_volume_path_and_file", func(t *testing.T) {
@@ -1573,7 +1577,7 @@ func TestContainerSidecarNative(t *testing.T) {
 		}))
 		require.NoError(t, err)
 		requireNativeShape(t, container)
-		requireProbeCommand(t, container, "/etc/creds/app/db.json")
+		requireProbeCommand(t, container, "/etc/creds/app/db.json", "/home/vault/.vault-token")
 	})
 
 	t.Run("ReviewFocus1_shell_metacharacters_are_literal_args", func(t *testing.T) {
@@ -1583,7 +1587,7 @@ func TestContainerSidecarNative(t *testing.T) {
 		}))
 		require.NoError(t, err)
 		requireNativeShape(t, container)
-		requireProbeCommand(t, container, "/vault/secrets/a b;$(id)")
+		requireProbeCommand(t, container, "/home/vault/.vault-token", "/vault/secrets/a b;$(id)")
 	})
 
 	t.Run("ReviewFocus2_probe_args_sorted_across_fresh_agents", func(t *testing.T) {
@@ -1594,15 +1598,15 @@ func TestContainerSidecarNative(t *testing.T) {
 				AnnotationAgentInjectSecret + "-mm": "secret/data/mm",
 			}))
 			require.NoError(t, err, "iteration %d", i)
-			requireProbeCommand(t, container, "/vault/secrets/aa", "/vault/secrets/mm", "/vault/secrets/zz")
+			requireProbeCommand(t, container, "/home/vault/.vault-token", "/vault/secrets/aa", "/vault/secrets/mm", "/vault/secrets/zz")
 		}
 	})
 
-	t.Run("AC12_no_secret_no_token", func(t *testing.T) {
+	t.Run("AC12_no_secret_no_token_waits_for_auth_token", func(t *testing.T) {
 		container, err := buildSidecar(t, nativeSidecarAnnotations(nil))
 		require.NoError(t, err)
 		requireNativeShape(t, container)
-		assert.Nil(t, container.StartupProbe)
+		requireProbeCommand(t, container, "/home/vault/.vault-token")
 	})
 
 	t.Run("AC16_revoke_on_shutdown_kept", func(t *testing.T) {
@@ -1633,7 +1637,7 @@ func TestContainerSidecarNative(t *testing.T) {
 		}))
 		require.NoError(t, err)
 		requireNativeShape(t, container)
-		requireProbeCommand(t, container, "/vault/secrets/db")
+		requireProbeCommand(t, container, "/home/vault/.vault-token", "/vault/secrets/db")
 		assert.Equal(t, int32(60), container.StartupProbe.FailureThreshold)
 		assert.Equal(t, int32(1), container.StartupProbe.PeriodSeconds)
 	})
@@ -1645,7 +1649,7 @@ func TestContainerSidecarNative(t *testing.T) {
 		}))
 		require.NoError(t, err)
 		requireNativeShape(t, container)
-		requireProbeCommand(t, container, "/vault/secrets/db")
+		requireProbeCommand(t, container, "/home/vault/.vault-token", "/vault/secrets/db")
 		assert.Equal(t, int32(5), container.StartupProbe.PeriodSeconds)
 		assert.Equal(t, int32(300), container.StartupProbe.FailureThreshold)
 	})
@@ -1677,4 +1681,41 @@ func TestContainerSidecarNative(t *testing.T) {
 		assert.Nil(t, container.RestartPolicy)
 		assert.Nil(t, container.StartupProbe)
 	})
+}
+
+func TestNativeSidecarProbeScript(t *testing.T) {
+	container, err := buildSidecar(t, nativeSidecarAnnotations(map[string]string{
+		AnnotationAgentInjectSecret + "-db": "secret/data/db",
+	}))
+	require.NoError(t, err)
+	require.NotNil(t, container.StartupProbe)
+	script := container.StartupProbe.Exec.Command[:4]
+
+	dir := t.TempDir()
+	present := filepath.Join(dir, "a b;$(touch pwned)")
+	require.NoError(t, os.WriteFile(present, []byte("x"), 0o600))
+	missing := filepath.Join(dir, "missing")
+
+	run := func(paths ...string) (int, string) {
+		cmd := exec.Command(script[0], append(script[1:], paths...)...)
+		cmd.Dir = dir
+		var stderr bytes.Buffer
+		cmd.Stderr = &stderr
+		err := cmd.Run()
+		if err == nil {
+			return 0, stderr.String()
+		}
+		var exitErr *exec.ExitError
+		require.ErrorAs(t, err, &exitErr)
+		return exitErr.ExitCode(), stderr.String()
+	}
+
+	code, stderr := run(present)
+	assert.Equal(t, 0, code)
+	assert.Empty(t, stderr)
+	assert.NoFileExists(t, filepath.Join(dir, "pwned"))
+
+	code, stderr = run(present, missing)
+	assert.Equal(t, 1, code)
+	assert.Equal(t, "startup-probe: missing "+missing+"\n", stderr)
 }

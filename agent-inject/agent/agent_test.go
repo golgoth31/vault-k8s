@@ -747,7 +747,7 @@ func TestPatchNativeSidecar(t *testing.T) {
 
 		agentContainer := findContainer(t, pod.Spec.InitContainers, "vault-agent")
 		requireNativeShape(t, agentContainer)
-		requireProbeCommand(t, agentContainer, "/vault/secrets/db")
+		requireProbeCommand(t, agentContainer, "/home/vault/.vault-token", "/vault/secrets/db")
 		require.Equal(t, false, decodedVaultConfig(t, agentContainer)["exit_after_auth"])
 		require.True(t, hasSecretMount(agentContainer), "native agent must mount the secret volume it renders into")
 		requireUniqueMountPaths(t, agentContainer)
