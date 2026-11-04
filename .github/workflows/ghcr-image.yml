@@ -79,7 +79,7 @@ jobs:
 
   publish:
     name: Publish signed image
-    if: github.event_name == 'push'
+    if: startsWith(github.ref, 'refs/tags/v')
     needs: [verify, scan]
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -101,7 +101,6 @@ jobs:
           images: ${{ env.IMAGE }}
           tags: |
             type=semver,pattern={{version}}
-            type=ref,event=branch
             type=sha,format=long
 
       - name: Setup Buildx
