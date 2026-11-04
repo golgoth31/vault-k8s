@@ -1485,7 +1485,7 @@ func optional[T any](x T) *T {
 	return &x
 }
 
-const nativeProbeScript = "for f in \"$@\"; do test -f \"$f\" || { echo \"startup-probe: missing $f\" >&2; exit 1; }; done"
+const nativeProbeScript = "for f in \"$@\"; do test -f \"$f\" || { printf 'startup-probe: missing %s\\n' \"$f\" >&2; exit 1; }; done"
 
 func nativeProbeCommand(paths ...string) []string {
 	return append([]string{"/bin/sh", "-c", nativeProbeScript, "startup-probe"}, paths...)
@@ -1718,4 +1718,9 @@ func TestNativeSidecarProbeScript(t *testing.T) {
 	code, stderr = run(present, missing)
 	assert.Equal(t, 1, code)
 	assert.Equal(t, "startup-probe: missing "+missing+"\n", stderr)
+
+	backslash := filepath.Join(dir, `a\cb\n`)
+	code, stderr = run(backslash)
+	assert.Equal(t, 1, code)
+	assert.Equal(t, "startup-probe: missing "+backslash+"\n", stderr)
 }

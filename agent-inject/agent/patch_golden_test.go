@@ -155,6 +155,23 @@ func TestPatchGolden(t *testing.T) {
 				AnnotationVaultSecretVolumePath + "-cache": "/etc/cache",
 			},
 		},
+		{
+			name:        "native-sidecar",
+			annotations: map[string]string{AnnotationAgentNativeSidecar: "true"},
+		},
+		{
+			name: "native-sidecar-init-first",
+			annotations: map[string]string{
+				AnnotationAgentNativeSidecar: "true",
+				AnnotationAgentInitFirst:     "true",
+			},
+			initContainers: setupInitContainer(),
+		},
+		{
+			name:           "native-sidecar-user-init-container",
+			annotations:    map[string]string{AnnotationAgentNativeSidecar: "true"},
+			initContainers: setupInitContainer(),
+		},
 	}
 
 	for _, tt := range tests {
