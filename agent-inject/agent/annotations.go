@@ -911,7 +911,7 @@ func (a *Agent) getEnableQuit() (bool, error) {
 }
 
 func (a *Agent) cachePersist(cacheEnabled bool) bool {
-	if cacheEnabled && a.PrePopulate && !a.PrePopulateOnly && !a.NativeSidecar {
+	if cacheEnabled && a.HasInitContainer() && a.HasSidecarContainer() {
 		return true
 	}
 	return false

@@ -30,6 +30,8 @@ const (
 
 	DefaultNativeSidecarProbePeriodSeconds    int32 = 1
 	DefaultNativeSidecarProbeFailureThreshold int32 = 300
+
+	startupProbeScript = "for f in \"$@\"; do test -f \"$f\" || { printf 'startup-probe: missing %s\\n' \"$f\" >&2; exit 1; }; done"
 )
 
 func (a *Agent) startupProbe() *corev1.Probe {
@@ -41,7 +43,7 @@ func (a *Agent) startupProbe() *corev1.Probe {
 		paths = append(paths, path.Join(a.Annotations[AnnotationVaultSecretVolumePath], "token"))
 	}
 	sort.Strings(paths)
-	command := append([]string{"/bin/sh", "-c", "for f in \"$@\"; do test -f \"$f\" || { printf 'startup-probe: missing %s\\n' \"$f\" >&2; exit 1; }; done", "startup-probe"}, paths...)
+	command := append([]string{"/bin/sh", "-c", startupProbeScript, "startup-probe"}, paths...)
 	return &corev1.Probe{
 		ProbeHandler: corev1.ProbeHandler{
 			Exec: &corev1.ExecAction{Command: command},

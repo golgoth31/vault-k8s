@@ -50,21 +50,15 @@ var (
 )
 
 func incrementInjections(namespace string, res MutateResponse) {
-	if res.InjectedNativeSidecar {
-		injectionsByNamespace.With(prometheus.Labels{
-			metricsLabelNamespace: namespace,
-			metricsLabelType:      metricsLabelTypeNativeSidecar,
-		}).Inc()
+	if !res.InjectedInit && !res.InjectedSidecar && !res.InjectedNativeSidecar {
 		return
 	}
 
-	if !res.InjectedInit && !res.InjectedSidecar {
-		return
-	}
-
-	// Injection type can be one of: init_and_sidecar (default); init_only; sidecar_only; or native_sidecar
+	// Injection type can be one of: init_and_sidecar (default); init_only; or sidecar_only
 	typeLabel := metricsLabelTypeBoth
-	if res.InjectedInit && !res.InjectedSidecar {
+	if res.InjectedNativeSidecar {
+		typeLabel = metricsLabelTypeNativeSidecar
+	} else if res.InjectedInit && !res.InjectedSidecar {
 		typeLabel = metricsLabelTypeInitOnly
 	} else if res.InjectedSidecar && !res.InjectedInit {
 		typeLabel = metricsLabelTypeSidecarOnly

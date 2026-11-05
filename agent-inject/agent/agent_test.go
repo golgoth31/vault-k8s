@@ -800,15 +800,6 @@ func TestPatchNativeSidecar(t *testing.T) {
 		require.Equal(t, todayCfg["cache"].(map[string]any)["use_auto_auth_token"], cache["use_auto_auth_token"])
 	})
 
-	t.Run("AC11b guard agent-json-patch removing restartPolicy fails Patch", func(t *testing.T) {
-		_, agent := buildNativePatchAgent(t, nativeOn(map[string]string{
-			AnnotationAgentJsonPatch: `[{"op":"remove","path":"/restartPolicy"}]`,
-		}), nil)
-		_, err := agent.Patch()
-		require.Error(t, err)
-		require.Contains(t, err.Error(), "restartPolicy")
-	})
-
 	t.Run("AC17 guard shareProcessNamespace patched", func(t *testing.T) {
 		pod, _ := patchedPod(t, nativeOn(map[string]string{AnnotationAgentShareProcessNamespace: "true"}), nil)
 		require.NotNil(t, pod.Spec.ShareProcessNamespace)

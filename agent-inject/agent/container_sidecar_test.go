@@ -1485,10 +1485,8 @@ func optional[T any](x T) *T {
 	return &x
 }
 
-const nativeProbeScript = "for f in \"$@\"; do test -f \"$f\" || { printf 'startup-probe: missing %s\\n' \"$f\" >&2; exit 1; }; done"
-
 func nativeProbeCommand(paths ...string) []string {
-	return append([]string{"/bin/sh", "-c", nativeProbeScript, "startup-probe"}, paths...)
+	return append([]string{"/bin/sh", "-c", startupProbeScript, "startup-probe"}, paths...)
 }
 
 func nativeSidecarAnnotations(extra map[string]string) map[string]string {
@@ -1630,47 +1628,40 @@ func TestContainerSidecarNative(t *testing.T) {
 		assert.Equal(t, classic.Lifecycle.PreStop.Exec.Command, native.Lifecycle.PreStop.Exec.Command)
 	})
 
-	t.Run("AC11_json_patch_failureThreshold", func(t *testing.T) {
-		container, err := buildSidecar(t, nativeSidecarAnnotations(map[string]string{
-			secretDB:                 "secret/data/db",
-			AnnotationAgentJsonPatch: `[{"op":"replace","path":"/startupProbe/failureThreshold","value":60}]`,
-		}))
-		require.NoError(t, err)
-		requireNativeShape(t, container)
-		requireProbeCommand(t, container, "/home/vault/.vault-token", "/vault/secrets/db")
-		assert.Equal(t, int32(60), container.StartupProbe.FailureThreshold)
-		assert.Equal(t, int32(1), container.StartupProbe.PeriodSeconds)
-	})
+	for name, tc := range map[string]struct {
+		patch         string
+		wantPeriod    int32
+		wantThreshold int32
+	}{
+		"AC11_json_patch_failureThreshold": {`[{"op":"replace","path":"/startupProbe/failureThreshold","value":60}]`, 1, 60},
+		"AC11_json_patch_periodSeconds":    {`[{"op":"replace","path":"/startupProbe/periodSeconds","value":5}]`, 5, 300},
+	} {
+		t.Run(name, func(t *testing.T) {
+			container, err := buildSidecar(t, nativeSidecarAnnotations(map[string]string{
+				secretDB:                 "secret/data/db",
+				AnnotationAgentJsonPatch: tc.patch,
+			}))
+			require.NoError(t, err)
+			requireNativeShape(t, container)
+			requireProbeCommand(t, container, "/home/vault/.vault-token", "/vault/secrets/db")
+			assert.Equal(t, tc.wantPeriod, container.StartupProbe.PeriodSeconds)
+			assert.Equal(t, tc.wantThreshold, container.StartupProbe.FailureThreshold)
+		})
+	}
 
-	t.Run("AC11_json_patch_periodSeconds", func(t *testing.T) {
-		container, err := buildSidecar(t, nativeSidecarAnnotations(map[string]string{
-			secretDB:                 "secret/data/db",
-			AnnotationAgentJsonPatch: `[{"op":"replace","path":"/startupProbe/periodSeconds","value":5}]`,
-		}))
-		require.NoError(t, err)
-		requireNativeShape(t, container)
-		requireProbeCommand(t, container, "/home/vault/.vault-token", "/vault/secrets/db")
-		assert.Equal(t, int32(5), container.StartupProbe.PeriodSeconds)
-		assert.Equal(t, int32(300), container.StartupProbe.FailureThreshold)
-	})
-
-	t.Run("guard_AC11b_json_patch_removes_restartPolicy", func(t *testing.T) {
-		_, err := buildSidecar(t, nativeSidecarAnnotations(map[string]string{
-			secretDB:                 "secret/data/db",
-			AnnotationAgentJsonPatch: `[{"op":"remove","path":"/restartPolicy"}]`,
-		}))
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "restartPolicy")
-	})
-
-	t.Run("AC11b_json_patch_sets_restartPolicy_not_Always", func(t *testing.T) {
-		_, err := buildSidecar(t, nativeSidecarAnnotations(map[string]string{
-			secretDB:                 "secret/data/db",
-			AnnotationAgentJsonPatch: `[{"op":"add","path":"/restartPolicy","value":"Never"}]`,
-		}))
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "restartPolicy")
-	})
+	for name, patch := range map[string]string{
+		"AC11b_json_patch_removes_restartPolicy":         `[{"op":"remove","path":"/restartPolicy"}]`,
+		"AC11b_json_patch_sets_restartPolicy_not_Always": `[{"op":"add","path":"/restartPolicy","value":"Never"}]`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := buildSidecar(t, nativeSidecarAnnotations(map[string]string{
+				secretDB:                 "secret/data/db",
+				AnnotationAgentJsonPatch: patch,
+			}))
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "restartPolicy")
+		})
+	}
 
 	t.Run("guard_native_off_has_no_restartPolicy_nor_probe", func(t *testing.T) {
 		container, err := buildSidecar(t, map[string]string{

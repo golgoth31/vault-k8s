@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	jsonpatch "github.com/evanphx/json-patch"
@@ -724,7 +725,7 @@ func (a *Agent) Patch() ([]byte, error) {
 	}
 
 	// Sidecar Container
-	if !a.PrePopulateOnly && !a.NativeSidecar {
+	if a.HasSidecarContainer() {
 		container, err := a.ContainerSidecar()
 		if err != nil {
 			return nil, err
@@ -789,30 +790,34 @@ func (a *Agent) Validate() error {
 			return fmt.Errorf("%s requires %s to be true", AnnotationAgentNativeSidecar, AnnotationAgentPrePopulate)
 		}
 
-		if a.PrePopulateOnly {
-			return fmt.Errorf("%s cannot be combined with %s", AnnotationAgentNativeSidecar, AnnotationAgentPrePopulateOnly)
-		}
-
-		if a.ConfigMapName != "" {
-			return fmt.Errorf("%s cannot be combined with %s", AnnotationAgentNativeSidecar, AnnotationAgentConfigMap)
-		}
-
-		if a.InitJsonPatch != "" {
-			return fmt.Errorf("%s cannot be combined with %s", AnnotationAgentNativeSidecar, AnnotationAgentInitJsonPatch)
-		}
-
-		for _, s := range a.Secrets {
-			if s.Command != "" {
-				return fmt.Errorf("%s cannot be combined with %s", AnnotationAgentNativeSidecar, AnnotationAgentInjectCommand)
+		hasCommand := slices.ContainsFunc(a.Secrets, func(s *Secret) bool { return s.Command != "" })
+		for _, c := range []struct {
+			set        bool
+			annotation string
+		}{
+			{a.PrePopulateOnly, AnnotationAgentPrePopulateOnly},
+			{a.ConfigMapName != "", AnnotationAgentConfigMap},
+			{a.InitJsonPatch != "", AnnotationAgentInitJsonPatch},
+			{hasCommand, AnnotationAgentInjectCommand},
+			{a.EnableQuit, AnnotationAgentEnableQuit},
+		} {
+			if c.set {
+				return fmt.Errorf("%s cannot be combined with %s", AnnotationAgentNativeSidecar, c.annotation)
 			}
-		}
-
-		if a.EnableQuit {
-			return fmt.Errorf("%s cannot be combined with %s", AnnotationAgentNativeSidecar, AnnotationAgentEnableQuit)
 		}
 	}
 
 	return nil
+}
+
+// HasInitContainer reports whether Patch adds a vault-agent-init container.
+func (a *Agent) HasInitContainer() bool {
+	return a.PrePopulate && !a.NativeSidecar
+}
+
+// HasSidecarContainer reports whether Patch adds a vault-agent container to the pod's containers.
+func (a *Agent) HasSidecarContainer() bool {
+	return !a.PrePopulateOnly && !a.NativeSidecar
 }
 
 func serviceaccount(pod *corev1.Pod) (*ServiceAccountTokenVolume, error) {

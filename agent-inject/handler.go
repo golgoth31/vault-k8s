@@ -286,8 +286,8 @@ func (h *Handler) Mutate(req *admissionv1.AdmissionRequest) MutateResponse {
 
 	return MutateResponse{
 		Resp:                  resp,
-		InjectedInit:          agentSidecar.PrePopulate && !agentSidecar.NativeSidecar,
-		InjectedSidecar:       !agentSidecar.PrePopulateOnly && !agentSidecar.NativeSidecar,
+		InjectedInit:          agentSidecar.HasInitContainer(),
+		InjectedSidecar:       agentSidecar.HasSidecarContainer(),
 		InjectedNativeSidecar: agentSidecar.NativeSidecar,
 	}
 }
