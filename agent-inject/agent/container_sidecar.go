@@ -166,7 +166,7 @@ func (a *Agent) ContainerSidecar() (corev1.Container, error) {
 		return newContainer, err
 	}
 	if a.NativeSidecar && (newContainer.RestartPolicy == nil || *newContainer.RestartPolicy != corev1.ContainerRestartPolicyAlways) {
-		return newContainer, fmt.Errorf("agent-json-patch must not remove or change restartPolicy of a native sidecar")
+		return newContainer, fmt.Errorf("%s must not remove or change restartPolicy of a native sidecar: it must stay %s", AnnotationAgentJsonPatch, corev1.ContainerRestartPolicyAlways)
 	}
 	return newContainer, nil
 }

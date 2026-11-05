@@ -605,35 +605,41 @@ func TestValidateNativeSidecar(t *testing.T) {
 		assert.NoError(t, a.Validate())
 	})
 
+	combined := func(annotation string) string {
+		return AnnotationAgentNativeSidecar + " cannot be combined with " + annotation
+	}
 	tests := map[string]struct {
-		mutate     func(a *Agent)
-		annotation string
+		mutate  func(a *Agent)
+		wantErr string
 	}{
-		"AC7 pre-populate false": {
-			mutate:     func(a *Agent) { a.PrePopulate = false },
-			annotation: "agent-pre-populate",
+		"pre-populate false": {
+			mutate:  func(a *Agent) { a.PrePopulate = false },
+			wantErr: AnnotationAgentNativeSidecar + " requires " + AnnotationAgentPrePopulate + " to be true",
 		},
-		"AC8 pre-populate-only true": {
-			mutate:     func(a *Agent) { a.PrePopulateOnly = true },
-			annotation: "agent-pre-populate-only",
+		"pre-populate-only true": {
+			mutate:  func(a *Agent) { a.PrePopulateOnly = true },
+			wantErr: combined(AnnotationAgentPrePopulateOnly),
 		},
-		"AC9 configmap set": {
-			mutate:     func(a *Agent) { a.ConfigMapName = "cm" },
-			annotation: "agent-configmap",
+		"configmap set": {
+			mutate:  func(a *Agent) { a.ConfigMapName = "cm" },
+			wantErr: combined(AnnotationAgentConfigMap),
 		},
-		"AC10 init-json-patch set": {
-			mutate:     func(a *Agent) { a.InitJsonPatch = "[]" },
-			annotation: "agent-init-json-patch",
+		"init-json-patch set": {
+			mutate:  func(a *Agent) { a.InitJsonPatch = "[]" },
+			wantErr: combined(AnnotationAgentInitJsonPatch),
 		},
-		"AC19 inject-command set": {
+		"inject-command set": {
 			mutate: func(a *Agent) {
-				a.Secrets = []*Secret{{Name: "db", Path: "secret/db", Command: "echo"}}
+				a.Secrets = []*Secret{
+					{Name: "cache", RawName: "cache", Path: "secret/cache"},
+					{Name: "db", RawName: "db", Path: "secret/db", Command: "echo"},
+				}
 			},
-			annotation: "agent-inject-command",
+			wantErr: combined(AnnotationAgentInjectCommand + "-db"),
 		},
-		"AC20 enable-quit true": {
-			mutate:     func(a *Agent) { a.EnableQuit = true },
-			annotation: "agent-enable-quit",
+		"enable-quit true": {
+			mutate:  func(a *Agent) { a.EnableQuit = true },
+			wantErr: combined(AnnotationAgentEnableQuit),
 		},
 	}
 
@@ -641,13 +647,9 @@ func TestValidateNativeSidecar(t *testing.T) {
 		t.Run(name+" native rejected", func(t *testing.T) {
 			a := baseAgent(true)
 			tc.mutate(&a)
-			err := a.Validate()
-			if assert.Error(t, err) {
-				assert.Contains(t, err.Error(), "agent-native-sidecar")
-				assert.Contains(t, err.Error(), tc.annotation)
-			}
+			assert.EqualError(t, a.Validate(), tc.wantErr)
 		})
-		t.Run(name+" guard non-native accepted", func(t *testing.T) {
+		t.Run(name+" non-native accepted", func(t *testing.T) {
 			a := baseAgent(false)
 			tc.mutate(&a)
 			assert.NoError(t, a.Validate())
@@ -737,7 +739,7 @@ func requireUniqueMountPaths(t *testing.T, c corev1.Container) {
 }
 
 func TestPatchNativeSidecar(t *testing.T) {
-	t.Run("AC3 single native sidecar in initContainers", func(t *testing.T) {
+	t.Run("single native sidecar in initContainers", func(t *testing.T) {
 		pod, _ := patchedPod(t, nativeOn(nil), nil)
 
 		require.Equal(t, []string{"vault-agent"}, containerNames(pod.Spec.InitContainers))
@@ -755,7 +757,7 @@ func TestPatchNativeSidecar(t *testing.T) {
 		require.True(t, hasSecretMount(findContainer(t, pod.Spec.Containers, "app")), "app must get the secret volume mount")
 	})
 
-	t.Run("AC6 user init container then native sidecar", func(t *testing.T) {
+	t.Run("user init container then native sidecar", func(t *testing.T) {
 		pod, _ := patchedPod(t, nativeOn(nil), setupInitContainer())
 
 		require.Equal(t, []string{"setup", "vault-agent"}, containerNames(pod.Spec.InitContainers))
@@ -766,7 +768,7 @@ func TestPatchNativeSidecar(t *testing.T) {
 		requireUniqueMountPaths(t, agentContainer)
 	})
 
-	t.Run("AC5 init-first native sidecar before user init container (Review Focus 3)", func(t *testing.T) {
+	t.Run("init-first native sidecar before user init container", func(t *testing.T) {
 		pod, _ := patchedPod(t, nativeOn(map[string]string{AnnotationAgentInitFirst: "true"}), setupInitContainer())
 
 		require.Equal(t, []string{"vault-agent", "setup"}, containerNames(pod.Spec.InitContainers))
@@ -777,7 +779,7 @@ func TestPatchNativeSidecar(t *testing.T) {
 		requireUniqueMountPaths(t, agentContainer)
 	})
 
-	t.Run("AC15 cache enabled without persistent cache (Review Focus 5)", func(t *testing.T) {
+	t.Run("cache enabled without persistent cache", func(t *testing.T) {
 		annotations := map[string]string{AnnotationAgentCacheEnable: "true"}
 		pod, agent := patchedPod(t, nativeOn(annotations), nil)
 		require.False(t, agent.VaultAgentCache.Persist)
@@ -800,19 +802,19 @@ func TestPatchNativeSidecar(t *testing.T) {
 		require.Equal(t, todayCfg["cache"].(map[string]any)["use_auto_auth_token"], cache["use_auto_auth_token"])
 	})
 
-	t.Run("AC17 guard shareProcessNamespace patched", func(t *testing.T) {
+	t.Run("shareProcessNamespace patched", func(t *testing.T) {
 		pod, _ := patchedPod(t, nativeOn(map[string]string{AnnotationAgentShareProcessNamespace: "true"}), nil)
 		require.NotNil(t, pod.Spec.ShareProcessNamespace)
 		require.True(t, *pod.Spec.ShareProcessNamespace)
 	})
 
-	t.Run("AC18 guard inject-containers limits secret mounts", func(t *testing.T) {
+	t.Run("inject-containers limits secret mounts", func(t *testing.T) {
 		pod, _ := patchedPod(t, nativeOn(map[string]string{AnnotationAgentInjectContainers: "app"}), nil)
 		require.True(t, hasSecretMount(findContainer(t, pod.Spec.Containers, "app")), "app must get the secret volume mount")
 		require.False(t, hasSecretMount(findContainer(t, pod.Spec.Containers, "other")), "other must not get the secret volume mount")
 	})
 
-	t.Run("AC2 guard native false patch equals annotation absent", func(t *testing.T) {
+	t.Run("native false patch equals annotation absent", func(t *testing.T) {
 		_, absent := buildNativePatchAgent(t, nil, nil)
 		_, off := buildNativePatchAgent(t, map[string]string{AnnotationAgentNativeSidecar: "false"}, nil)
 		absentPatch, err := absent.Patch()

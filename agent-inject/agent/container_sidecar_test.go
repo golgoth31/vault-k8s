@@ -1542,7 +1542,7 @@ func decodedVaultConfig(t *testing.T, container corev1.Container) map[string]any
 func TestContainerSidecarNative(t *testing.T) {
 	secretDB := AnnotationAgentInjectSecret + "-db"
 
-	t.Run("AC3_one_secret", func(t *testing.T) {
+	t.Run("one_secret", func(t *testing.T) {
 		container, err := buildSidecar(t, nativeSidecarAnnotations(map[string]string{
 			secretDB: "secret/data/db",
 		}))
@@ -1557,7 +1557,7 @@ func TestContainerSidecarNative(t *testing.T) {
 		assert.Equal(t, false, cfg["exit_after_auth"])
 	})
 
-	t.Run("AC13_token_and_secret", func(t *testing.T) {
+	t.Run("token_and_secret", func(t *testing.T) {
 		container, err := buildSidecar(t, nativeSidecarAnnotations(map[string]string{
 			secretDB:                   "secret/data/db",
 			AnnotationAgentInjectToken: "true",
@@ -1567,7 +1567,7 @@ func TestContainerSidecarNative(t *testing.T) {
 		requireProbeCommand(t, container, "/home/vault/.vault-token", "/vault/secrets/db", "/vault/secrets/token")
 	})
 
-	t.Run("AC14_custom_volume_path_and_file", func(t *testing.T) {
+	t.Run("custom_volume_path_and_file", func(t *testing.T) {
 		container, err := buildSidecar(t, nativeSidecarAnnotations(map[string]string{
 			secretDB:                                "secret/data/db",
 			AnnotationVaultSecretVolumePath + "-db": "/etc/creds",
@@ -1578,7 +1578,7 @@ func TestContainerSidecarNative(t *testing.T) {
 		requireProbeCommand(t, container, "/etc/creds/app/db.json", "/home/vault/.vault-token")
 	})
 
-	t.Run("ReviewFocus1_shell_metacharacters_are_literal_args", func(t *testing.T) {
+	t.Run("shell_metacharacters_are_literal_args", func(t *testing.T) {
 		container, err := buildSidecar(t, nativeSidecarAnnotations(map[string]string{
 			secretDB:                          "secret/data/db",
 			AnnotationAgentInjectFile + "-db": "a b;$(id)",
@@ -1588,7 +1588,7 @@ func TestContainerSidecarNative(t *testing.T) {
 		requireProbeCommand(t, container, "/home/vault/.vault-token", "/vault/secrets/a b;$(id)")
 	})
 
-	t.Run("ReviewFocus2_probe_args_sorted_across_fresh_agents", func(t *testing.T) {
+	t.Run("probe_args_sorted_across_fresh_agents", func(t *testing.T) {
 		for i := 0; i < 20; i++ {
 			container, err := buildSidecar(t, nativeSidecarAnnotations(map[string]string{
 				AnnotationAgentInjectSecret + "-zz": "secret/data/zz",
@@ -1600,14 +1600,14 @@ func TestContainerSidecarNative(t *testing.T) {
 		}
 	})
 
-	t.Run("AC12_no_secret_no_token_waits_for_auth_token", func(t *testing.T) {
+	t.Run("no_secret_no_token_waits_for_auth_token", func(t *testing.T) {
 		container, err := buildSidecar(t, nativeSidecarAnnotations(nil))
 		require.NoError(t, err)
 		requireNativeShape(t, container)
 		requireProbeCommand(t, container, "/home/vault/.vault-token")
 	})
 
-	t.Run("AC16_revoke_on_shutdown_kept", func(t *testing.T) {
+	t.Run("revoke_on_shutdown_kept", func(t *testing.T) {
 		native, err := buildSidecar(t, nativeSidecarAnnotations(map[string]string{
 			secretDB:                        "secret/data/db",
 			AnnotationAgentRevokeOnShutdown: "true",
@@ -1633,8 +1633,8 @@ func TestContainerSidecarNative(t *testing.T) {
 		wantPeriod    int32
 		wantThreshold int32
 	}{
-		"AC11_json_patch_failureThreshold": {`[{"op":"replace","path":"/startupProbe/failureThreshold","value":60}]`, 1, 60},
-		"AC11_json_patch_periodSeconds":    {`[{"op":"replace","path":"/startupProbe/periodSeconds","value":5}]`, 5, 300},
+		"json_patch_failureThreshold": {`[{"op":"replace","path":"/startupProbe/failureThreshold","value":60}]`, 1, 60},
+		"json_patch_periodSeconds":    {`[{"op":"replace","path":"/startupProbe/periodSeconds","value":5}]`, 5, 300},
 	} {
 		t.Run(name, func(t *testing.T) {
 			container, err := buildSidecar(t, nativeSidecarAnnotations(map[string]string{
@@ -1650,8 +1650,8 @@ func TestContainerSidecarNative(t *testing.T) {
 	}
 
 	for name, patch := range map[string]string{
-		"AC11b_json_patch_removes_restartPolicy":         `[{"op":"remove","path":"/restartPolicy"}]`,
-		"AC11b_json_patch_sets_restartPolicy_not_Always": `[{"op":"add","path":"/restartPolicy","value":"Never"}]`,
+		"json_patch_removes_restartPolicy":         `[{"op":"remove","path":"/restartPolicy"}]`,
+		"json_patch_sets_restartPolicy_not_Always": `[{"op":"add","path":"/restartPolicy","value":"Never"}]`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := buildSidecar(t, nativeSidecarAnnotations(map[string]string{
@@ -1663,7 +1663,7 @@ func TestContainerSidecarNative(t *testing.T) {
 		})
 	}
 
-	t.Run("guard_native_off_has_no_restartPolicy_nor_probe", func(t *testing.T) {
+	t.Run("native_off_has_no_restartPolicy_nor_probe", func(t *testing.T) {
 		container, err := buildSidecar(t, map[string]string{
 			AnnotationVaultRole: "foobar",
 			secretDB:            "secret/data/db",
@@ -1672,6 +1672,38 @@ func TestContainerSidecarNative(t *testing.T) {
 		assert.Nil(t, container.RestartPolicy)
 		assert.Nil(t, container.StartupProbe)
 	})
+}
+
+func TestNativeSidecarProbeMatchesAgentConfig(t *testing.T) {
+	secretDB := AnnotationAgentInjectSecret + "-db"
+	for name, extra := range map[string]map[string]string{
+		"no_secret":  nil,
+		"one_secret": {secretDB: "secret/data/db"},
+		"token":      {secretDB: "secret/data/db", AnnotationAgentInjectToken: "true"},
+		"custom_volume_path_and_file": {
+			secretDB:                                "secret/data/db",
+			AnnotationVaultSecretVolumePath:         "/etc/secrets",
+			AnnotationVaultSecretVolumePath + "-db": "/etc/creds",
+			AnnotationAgentInjectFile + "-db":       "app/db.json",
+			AnnotationAgentInjectToken:              "true",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			container, err := buildSidecar(t, nativeSidecarAnnotations(extra))
+			require.NoError(t, err)
+			cfg := decodedVaultConfig(t, container)
+
+			var written []string
+			for _, sink := range cfg["auto_auth"].(map[string]any)["sink"].([]any) {
+				written = append(written, sink.(map[string]any)["config"].(map[string]any)["path"].(string))
+			}
+			templates, _ := cfg["template"].([]any)
+			for _, tpl := range templates {
+				written = append(written, tpl.(map[string]any)["destination"].(string))
+			}
+			assert.ElementsMatch(t, written, container.StartupProbe.Exec.Command[4:])
+		})
+	}
 }
 
 func TestNativeSidecarProbeScript(t *testing.T) {

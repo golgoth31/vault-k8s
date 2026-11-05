@@ -81,6 +81,7 @@ func (a *Agent) ContainerTokenVolume() []corev1.Volume {
 		}
 		vols = append(vols, initVol)
 	}
+	// Not HasSidecarContainer(): the native sidecar in initContainers mounts this volume too.
 	if !a.PrePopulateOnly {
 		sidecarVol := corev1.Volume{
 			Name: tokenVolumeNameSidecar,

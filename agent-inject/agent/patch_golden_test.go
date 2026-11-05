@@ -175,7 +175,7 @@ func TestPatchGolden(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		t.Run("AC1_"+tt.name, func(t *testing.T) {
+		t.Run(tt.name, func(t *testing.T) {
 			pod := goldenPod(tt.annotations, tt.initContainers)
 			require.NoError(t, Init(pod, goldenAgentConfig()))
 			agent, err := New(pod)

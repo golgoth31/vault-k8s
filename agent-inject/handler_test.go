@@ -504,3 +504,47 @@ func TestHandlerMutate_NativeSidecar(t *testing.T) {
 	require.False(t, res.InjectedInit)
 	require.False(t, res.InjectedSidecar)
 }
+
+func TestHandlerMutate_NativeSidecarRejected(t *testing.T) {
+	for name, tc := range map[string]struct {
+		annotation string
+		value      string
+		wantErr    string
+	}{
+		"pre-populate false": {
+			annotation: agent.AnnotationAgentPrePopulate,
+			value:      "false",
+			wantErr:    agent.AnnotationAgentNativeSidecar + " requires " + agent.AnnotationAgentPrePopulate + " to be true",
+		},
+		"inject-command": {
+			annotation: agent.AnnotationAgentInjectCommand + "-db",
+			value:      "echo",
+			wantErr:    agent.AnnotationAgentNativeSidecar + " cannot be combined with " + agent.AnnotationAgentInjectCommand + "-db",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			annotations := map[string]string{
+				agent.AnnotationAgentInject:               "true",
+				agent.AnnotationVaultRole:                 "demo",
+				agent.AnnotationAgentInjectSecret + "-db": "secret/data/db",
+				agent.AnnotationAgentNativeSidecar:        "true",
+				tc.annotation:                             tc.value,
+			}
+			h := basicHandler()
+			res := h.Mutate(&admissionv1.AdmissionRequest{
+				Namespace: "test",
+				Object: encodeRaw(t, &corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{Annotations: annotations},
+					Spec: corev1.PodSpec{
+						Containers: []corev1.Container{{Name: "web", VolumeMounts: []corev1.VolumeMount{{Name: "foobar", MountPath: "serviceaccount/somewhere"}}}},
+					},
+				}),
+			})
+			require.False(t, res.Resp.Allowed)
+			require.Equal(t, "error validating agent configuration: "+tc.wantErr, res.Resp.Result.Message)
+			require.False(t, res.InjectedNativeSidecar)
+			require.False(t, res.InjectedInit)
+			require.False(t, res.InjectedSidecar)
+		})
+	}
+}

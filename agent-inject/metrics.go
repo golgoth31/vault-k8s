@@ -54,7 +54,6 @@ func incrementInjections(namespace string, res MutateResponse) {
 		return
 	}
 
-	// Injection type can be one of: init_and_sidecar (default); init_only; or sidecar_only
 	typeLabel := metricsLabelTypeBoth
 	if res.InjectedNativeSidecar {
 		typeLabel = metricsLabelTypeNativeSidecar

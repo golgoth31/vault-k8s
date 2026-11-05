@@ -790,7 +790,10 @@ func (a *Agent) Validate() error {
 			return fmt.Errorf("%s requires %s to be true", AnnotationAgentNativeSidecar, AnnotationAgentPrePopulate)
 		}
 
-		hasCommand := slices.ContainsFunc(a.Secrets, func(s *Secret) bool { return s.Command != "" })
+		commandAnnotation := ""
+		if i := slices.IndexFunc(a.Secrets, func(s *Secret) bool { return s.Command != "" }); i >= 0 {
+			commandAnnotation = AnnotationAgentInjectCommand + "-" + a.Secrets[i].RawName
+		}
 		for _, c := range []struct {
 			set        bool
 			annotation string
@@ -798,7 +801,7 @@ func (a *Agent) Validate() error {
 			{a.PrePopulateOnly, AnnotationAgentPrePopulateOnly},
 			{a.ConfigMapName != "", AnnotationAgentConfigMap},
 			{a.InitJsonPatch != "", AnnotationAgentInitJsonPatch},
-			{hasCommand, AnnotationAgentInjectCommand},
+			{commandAnnotation != "", commandAnnotation},
 			{a.EnableQuit, AnnotationAgentEnableQuit},
 		} {
 			if c.set {
@@ -810,12 +813,10 @@ func (a *Agent) Validate() error {
 	return nil
 }
 
-// HasInitContainer reports whether Patch adds a vault-agent-init container.
 func (a *Agent) HasInitContainer() bool {
 	return a.PrePopulate && !a.NativeSidecar
 }
 
-// HasSidecarContainer reports whether Patch adds a vault-agent container to the pod's containers.
 func (a *Agent) HasSidecarContainer() bool {
 	return !a.PrePopulateOnly && !a.NativeSidecar
 }

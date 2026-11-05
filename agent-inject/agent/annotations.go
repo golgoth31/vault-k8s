@@ -118,7 +118,6 @@ const (
 	// to run when a pod starts. Default is last.
 	AnnotationAgentInitFirst = "vault.hashicorp.com/agent-init-first"
 
-	// AnnotationAgentNativeSidecar injects one native sidecar instead of an init container plus a sidecar.
 	// Needs native sidecars (Kubernetes >= 1.29) on API server and nodes, else the pod is rejected.
 	AnnotationAgentNativeSidecar = "vault.hashicorp.com/agent-native-sidecar"
 
