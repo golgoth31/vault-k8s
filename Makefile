@@ -101,12 +101,26 @@ exercise:
 		--overrides='{ "apiVersion": "v1", "spec": { "serviceAccountName": "test-app-sa" } }'
 	kubectl wait --for=condition=Ready --timeout=5m pod nginx
 	kubectl exec nginx -c nginx -- cat /vault/secrets/secret.txt
+	kubectl delete pod nginx-native --ignore-not-found
+	kubectl run nginx-native \
+		--image=nginx \
+		--restart=Never \
+		--annotations="vault.hashicorp.com/agent-inject=true" \
+		--annotations="vault.hashicorp.com/agent-native-sidecar=true" \
+		--annotations="vault.hashicorp.com/role=test-app" \
+		--annotations="vault.hashicorp.com/agent-inject-secret-secret.txt=secret/data/test-app" \
+		--overrides='{ "apiVersion": "v1", "spec": { "serviceAccountName": "test-app-sa" } }' \
+		--command -- sh -c 'test -f /vault/secrets/secret.txt || exit 1; exec nginx -g "daemon off;"'
+	kubectl wait --for=condition=Ready --timeout=5m pod nginx-native
+	test "$$(kubectl get pod nginx-native -o jsonpath='{.spec.initContainers[?(@.name=="vault-agent")].restartPolicy}')" = Always
+	test "$$(kubectl get pod nginx-native -o jsonpath='{.spec.containers[*].name}')" = nginx-native
+	kubectl exec nginx-native -c nginx-native -- cat /vault/secrets/secret.txt
 
 # Teardown any resources created in deploy and exercise targets.
 teardown:
 	helm uninstall --namespace default vault --wait 2> /dev/null || true
 	kubectl delete --ignore-not-found serviceaccount test-app-sa
-	kubectl delete --ignore-not-found pod nginx
+	kubectl delete --ignore-not-found pod nginx nginx-native
 	@if [ "$(ENT_TESTS)" = "true" ]; then\
 		kubectl delete --ignore-not-found secret vault-ent-license || true;\
 	fi

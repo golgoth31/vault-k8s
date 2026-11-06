@@ -53,6 +53,16 @@ func Test_incrementInjections(t *testing.T) {
 				metricsLabelType:      metricsLabelTypeBoth,
 			},
 		},
+		"AC21_native_sidecar": {
+			namespace: "native",
+			mutateResponse: MutateResponse{
+				InjectedNativeSidecar: true,
+			},
+			expectedLabels: map[string]string{
+				metricsLabelNamespace: "native",
+				metricsLabelType:      metricsLabelTypeNativeSidecar,
+			},
+		},
 		"no_injection": {
 			namespace: "none",
 			mutateResponse: MutateResponse{

@@ -1,0 +1,274 @@
+[
+  {
+    "op": "add",
+    "path": "/spec/volumes/-",
+    "value": {
+      "emptyDir": {
+        "medium": "Memory"
+      },
+      "name": "home-init"
+    }
+  },
+  {
+    "op": "add",
+    "path": "/spec/volumes/-",
+    "value": {
+      "emptyDir": {
+        "medium": "Memory"
+      },
+      "name": "home-sidecar"
+    }
+  },
+  {
+    "op": "add",
+    "path": "/spec/volumes/-",
+    "value": {
+      "emptyDir": {
+        "medium": "Memory"
+      },
+      "name": "vault-secrets"
+    }
+  },
+  {
+    "op": "add",
+    "path": "/spec/volumes/-",
+    "value": {
+      "configMap": {
+        "name": "agent-config"
+      },
+      "name": "vault-config"
+    }
+  },
+  {
+    "op": "add",
+    "path": "/spec/containers/0/volumeMounts/-",
+    "value": {
+      "mountPath": "/vault/secrets",
+      "name": "vault-secrets"
+    }
+  },
+  {
+    "op": "add",
+    "path": "/spec/containers/1/volumeMounts",
+    "value": [
+      {
+        "mountPath": "/vault/secrets",
+        "name": "vault-secrets"
+      }
+    ]
+  },
+  {
+    "op": "add",
+    "path": "/spec/initContainers",
+    "value": [
+      {
+        "args": [
+          "touch /home/vault/.vault-token && vault agent -config=/vault/configs/config-init.hcl"
+        ],
+        "command": [
+          "/bin/sh",
+          "-ec"
+        ],
+        "env": [
+          {
+            "name": "NAMESPACE",
+            "valueFrom": {
+              "fieldRef": {
+                "fieldPath": "metadata.namespace"
+              }
+            }
+          },
+          {
+            "name": "HOST_IP",
+            "valueFrom": {
+              "fieldRef": {
+                "fieldPath": "status.hostIP"
+              }
+            }
+          },
+          {
+            "name": "POD_IP",
+            "valueFrom": {
+              "fieldRef": {
+                "fieldPath": "status.podIP"
+              }
+            }
+          },
+          {
+            "name": "VAULT_LOG_LEVEL",
+            "value": "info"
+          },
+          {
+            "name": "VAULT_LOG_FORMAT",
+            "value": "standard"
+          },
+          {
+            "name": "HTTPS_PROXY",
+            "value": "http://proxy:3128"
+          },
+          {
+            "name": "VAULT_ADDR",
+            "value": "http://foobar:8200"
+          },
+          {
+            "name": "VAULT_SKIP_VERIFY",
+            "value": "false"
+          }
+        ],
+        "image": "foobar-image",
+        "name": "vault-agent-init",
+        "resources": {
+          "limits": {
+            "cpu": "500m",
+            "memory": "128Mi"
+          },
+          "requests": {
+            "cpu": "250m",
+            "memory": "64Mi"
+          }
+        },
+        "securityContext": {
+          "allowPrivilegeEscalation": false,
+          "capabilities": {
+            "drop": [
+              "ALL"
+            ]
+          },
+          "readOnlyRootFilesystem": true,
+          "runAsGroup": 1000,
+          "runAsNonRoot": true,
+          "runAsUser": 100
+        },
+        "volumeMounts": [
+          {
+            "mountPath": "/home/vault",
+            "name": "home-init"
+          },
+          {
+            "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
+            "name": "kube-api-access",
+            "readOnly": true
+          },
+          {
+            "mountPath": "/vault/secrets",
+            "name": "vault-secrets"
+          },
+          {
+            "mountPath": "/vault/configs",
+            "name": "vault-config",
+            "readOnly": true
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "op": "add",
+    "path": "/spec/containers/-",
+    "value": {
+      "args": [
+        "touch /home/vault/.vault-token && vault agent -config=/vault/configs/config.hcl"
+      ],
+      "command": [
+        "/bin/sh",
+        "-ec"
+      ],
+      "env": [
+        {
+          "name": "NAMESPACE",
+          "valueFrom": {
+            "fieldRef": {
+              "fieldPath": "metadata.namespace"
+            }
+          }
+        },
+        {
+          "name": "HOST_IP",
+          "valueFrom": {
+            "fieldRef": {
+              "fieldPath": "status.hostIP"
+            }
+          }
+        },
+        {
+          "name": "POD_IP",
+          "valueFrom": {
+            "fieldRef": {
+              "fieldPath": "status.podIP"
+            }
+          }
+        },
+        {
+          "name": "VAULT_LOG_LEVEL",
+          "value": "info"
+        },
+        {
+          "name": "VAULT_LOG_FORMAT",
+          "value": "standard"
+        },
+        {
+          "name": "HTTPS_PROXY",
+          "value": "http://proxy:3128"
+        },
+        {
+          "name": "VAULT_ADDR",
+          "value": "http://foobar:8200"
+        },
+        {
+          "name": "VAULT_SKIP_VERIFY",
+          "value": "false"
+        }
+      ],
+      "image": "foobar-image",
+      "lifecycle": {},
+      "name": "vault-agent",
+      "resources": {
+        "limits": {
+          "cpu": "500m",
+          "memory": "128Mi"
+        },
+        "requests": {
+          "cpu": "250m",
+          "memory": "64Mi"
+        }
+      },
+      "securityContext": {
+        "allowPrivilegeEscalation": false,
+        "capabilities": {
+          "drop": [
+            "ALL"
+          ]
+        },
+        "readOnlyRootFilesystem": true,
+        "runAsGroup": 1000,
+        "runAsNonRoot": true,
+        "runAsUser": 100
+      },
+      "volumeMounts": [
+        {
+          "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
+          "name": "kube-api-access",
+          "readOnly": true
+        },
+        {
+          "mountPath": "/home/vault",
+          "name": "home-sidecar"
+        },
+        {
+          "mountPath": "/vault/secrets",
+          "name": "vault-secrets"
+        },
+        {
+          "mountPath": "/vault/configs",
+          "name": "vault-config",
+          "readOnly": true
+        }
+      ]
+    }
+  },
+  {
+    "op": "add",
+    "path": "/metadata/annotations/vault.hashicorp.com~1agent-inject-status",
+    "value": "injected"
+  }
+]

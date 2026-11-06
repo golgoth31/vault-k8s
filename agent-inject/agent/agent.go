@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	jsonpatch "github.com/evanphx/json-patch"
@@ -85,6 +86,8 @@ type Agent struct {
 	// PrePopulateOnly controls whether an init container is the _only_ container
 	// added to the request.
 	PrePopulateOnly bool
+
+	NativeSidecar bool
 
 	// RevokeOnShutdown controls whether a sidecar container will attempt to revoke its Vault
 	// token on shutting down.
@@ -445,6 +448,14 @@ func New(pod *corev1.Pod) (*Agent, error) {
 		return agent, err
 	}
 
+	agent.NativeSidecar, err = agent.nativeSidecar()
+	if err != nil {
+		return agent, err
+	}
+	if agent.NativeSidecar {
+		agent.PrePopulateOnly = false
+	}
+
 	agent.RevokeOnShutdown, err = agent.revokeOnShutdown()
 	if err != nil {
 		return agent, err
@@ -663,7 +674,11 @@ func (a *Agent) Patch() ([]byte, error) {
 
 	// Init Container
 	if a.PrePopulate {
-		container, err := a.ContainerInitSidecar()
+		initSidecar := a.ContainerInitSidecar
+		if a.NativeSidecar {
+			initSidecar = a.ContainerSidecar
+		}
+		container, err := initSidecar()
 		if err != nil {
 			return nil, err
 		}
@@ -697,7 +712,7 @@ func (a *Agent) Patch() ([]byte, error) {
 
 		// Add Volume Mounts
 		for i, container := range containers {
-			if container.Name == "vault-agent-init" {
+			if container.Name == "vault-agent-init" || (a.NativeSidecar && container.Name == "vault-agent") {
 				continue
 			}
 			patches = append(patches, addVolumeMounts(
@@ -713,7 +728,7 @@ func (a *Agent) Patch() ([]byte, error) {
 	}
 
 	// Sidecar Container
-	if !a.PrePopulateOnly {
+	if a.HasSidecarContainer() {
 		container, err := a.ContainerSidecar()
 		if err != nil {
 			return nil, err
@@ -772,7 +787,40 @@ func (a *Agent) Validate() error {
 			return errors.New("no Vault address found")
 		}
 	}
+
+	if a.NativeSidecar {
+		if !a.PrePopulate {
+			return fmt.Errorf("%s requires %s to be true", AnnotationAgentNativeSidecar, AnnotationAgentPrePopulate)
+		}
+
+		commandAnnotation := ""
+		if i := slices.IndexFunc(a.Secrets, func(s *Secret) bool { return s.Command != "" }); i >= 0 {
+			commandAnnotation = AnnotationAgentInjectCommand + "-" + a.Secrets[i].RawName
+		}
+		for _, c := range []struct {
+			set        bool
+			annotation string
+		}{
+			{a.ConfigMapName != "", AnnotationAgentConfigMap},
+			{a.InitJsonPatch != "", AnnotationAgentInitJsonPatch},
+			{commandAnnotation != "", commandAnnotation},
+			{a.EnableQuit, AnnotationAgentEnableQuit},
+		} {
+			if c.set {
+				return fmt.Errorf("%s cannot be combined with %s", AnnotationAgentNativeSidecar, c.annotation)
+			}
+		}
+	}
+
 	return nil
+}
+
+func (a *Agent) HasInitContainer() bool {
+	return a.PrePopulate && !a.NativeSidecar
+}
+
+func (a *Agent) HasSidecarContainer() bool {
+	return !a.PrePopulateOnly && !a.NativeSidecar
 }
 
 func serviceaccount(pod *corev1.Pod) (*ServiceAccountTokenVolume, error) {
