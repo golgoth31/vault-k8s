@@ -452,6 +452,9 @@ func New(pod *corev1.Pod) (*Agent, error) {
 	if err != nil {
 		return agent, err
 	}
+	if agent.NativeSidecar {
+		agent.PrePopulateOnly = false
+	}
 
 	agent.RevokeOnShutdown, err = agent.revokeOnShutdown()
 	if err != nil {
@@ -798,7 +801,6 @@ func (a *Agent) Validate() error {
 			set        bool
 			annotation string
 		}{
-			{a.PrePopulateOnly, AnnotationAgentPrePopulateOnly},
 			{a.ConfigMapName != "", AnnotationAgentConfigMap},
 			{a.InitJsonPatch != "", AnnotationAgentInitJsonPatch},
 			{commandAnnotation != "", commandAnnotation},

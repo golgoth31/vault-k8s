@@ -3,7 +3,8 @@
 Features:
 * Add `vault.hashicorp.com/agent-native-sidecar` annotation: inject a single `vault-agent` Kubernetes native sidecar (init container with `restartPolicy: Always`) instead of `vault-agent-init` plus `vault-agent`. A startup probe holds the following containers until the agent's auto-auth token sink (`/home/vault/.vault-token`) and every rendered secret file (and the token file with `agent-inject-token`) exist; a failed probe names the missing file.
   * Requires native sidecar support on the API server and the nodes (Kubernetes 1.29+). An API server without it rejects the pod at creation.
-  * Rejected together with `agent-pre-populate: "false"`, `agent-pre-populate-only`, `agent-configmap`, `agent-init-json-patch`, `agent-inject-command-*` and `agent-enable-quit`.
+  * Rejected together with `agent-pre-populate: "false"`, `agent-configmap`, `agent-init-json-patch`, `agent-inject-command-*` and `agent-enable-quit`.
+  * `agent-pre-populate-only` is ignored with `agent-native-sidecar`, so a pod can carry both annotations for injectors that do not support native sidecars.
   * Of the startup probe, only `failureThreshold` (default 300) and `periodSeconds` (default 1) are supported `agent-json-patch` overrides: removing the probe disables the wait, and replacing its command replaces the file check. An `agent-json-patch` that removes or changes `restartPolicy` is rejected.
   * `agent-revoke-on-shutdown` is best-effort: the revoke still runs when the pod starts terminating, but the agent keeps running until the application exits and may re-authenticate in that window.
   * Jobs: the agent no longer blocks completion, but sidecars ignore the pod `restartPolicy`, so with `restartPolicy: Never` an agent that never passes its startup probe leaves the pod in Init instead of failing it; set `activeDeadlineSeconds`. The agent's resource requests are added to the application containers' requests for the whole run.

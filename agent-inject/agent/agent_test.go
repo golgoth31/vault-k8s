@@ -612,23 +612,22 @@ func TestValidateNativeSidecar(t *testing.T) {
 		mutate  func(a *Agent)
 		wantErr string
 	}{
-		"pre-populate false": {
+		"AC5 pre-populate false": {
 			mutate:  func(a *Agent) { a.PrePopulate = false },
 			wantErr: AnnotationAgentNativeSidecar + " requires " + AnnotationAgentPrePopulate + " to be true",
 		},
-		"pre-populate-only true": {
-			mutate:  func(a *Agent) { a.PrePopulateOnly = true },
-			wantErr: combined(AnnotationAgentPrePopulateOnly),
+		"AC6 pre-populate-only true": {
+			mutate: func(a *Agent) { a.PrePopulateOnly = true },
 		},
-		"configmap set": {
+		"AC5 configmap set": {
 			mutate:  func(a *Agent) { a.ConfigMapName = "cm" },
 			wantErr: combined(AnnotationAgentConfigMap),
 		},
-		"init-json-patch set": {
+		"AC5 init-json-patch set": {
 			mutate:  func(a *Agent) { a.InitJsonPatch = "[]" },
 			wantErr: combined(AnnotationAgentInitJsonPatch),
 		},
-		"inject-command set": {
+		"AC5 inject-command set": {
 			mutate: func(a *Agent) {
 				a.Secrets = []*Secret{
 					{Name: "cache", RawName: "cache", Path: "secret/cache"},
@@ -637,16 +636,20 @@ func TestValidateNativeSidecar(t *testing.T) {
 			},
 			wantErr: combined(AnnotationAgentInjectCommand + "-db"),
 		},
-		"enable-quit true": {
+		"AC5 enable-quit true": {
 			mutate:  func(a *Agent) { a.EnableQuit = true },
 			wantErr: combined(AnnotationAgentEnableQuit),
 		},
 	}
 
 	for name, tc := range tests {
-		t.Run(name+" native rejected", func(t *testing.T) {
+		t.Run(name+" native", func(t *testing.T) {
 			a := baseAgent(true)
 			tc.mutate(&a)
+			if tc.wantErr == "" {
+				assert.NoError(t, a.Validate())
+				return
+			}
 			assert.EqualError(t, a.Validate(), tc.wantErr)
 		})
 		t.Run(name+" non-native accepted", func(t *testing.T) {
@@ -822,5 +825,124 @@ func TestPatchNativeSidecar(t *testing.T) {
 		offPatch, err := off.Patch()
 		require.NoError(t, err)
 		require.Equal(t, string(normalisePatch(t, absentPatch)), string(normalisePatch(t, offPatch)))
+	})
+}
+
+func newGoldenAgent(t *testing.T, annotations map[string]string) *Agent {
+	t.Helper()
+	pod := goldenPod(annotations, nil)
+	require.NoError(t, Init(pod, goldenAgentConfig()))
+	agent, err := New(pod)
+	require.NoError(t, err)
+	return agent
+}
+
+func TestNewNativeSidecarIgnoresPrePopulateOnly(t *testing.T) {
+	tests := map[string]struct {
+		annotations         map[string]string
+		wantNative          bool
+		wantPrePopulateOnly bool
+		wantErr             string
+	}{
+		"AC1 native and pre-populate-only": {
+			annotations: map[string]string{
+				AnnotationAgentNativeSidecar:   "true",
+				AnnotationAgentPrePopulateOnly: "true",
+			},
+			wantNative: true,
+		},
+		"AC1 native and pre-populate-only with pre-populate true": {
+			annotations: map[string]string{
+				AnnotationAgentNativeSidecar:   "true",
+				AnnotationAgentPrePopulateOnly: "true",
+				AnnotationAgentPrePopulate:     "true",
+			},
+			wantNative: true,
+		},
+		"unchanged native with pre-populate-only false": {
+			annotations: map[string]string{
+				AnnotationAgentNativeSidecar:   "true",
+				AnnotationAgentPrePopulateOnly: "false",
+			},
+			wantNative: true,
+		},
+		"unchanged pre-populate-only without native": {
+			annotations:         map[string]string{AnnotationAgentPrePopulateOnly: "true"},
+			wantPrePopulateOnly: true,
+		},
+		"unchanged pre-populate-only with native false": {
+			annotations: map[string]string{
+				AnnotationAgentNativeSidecar:   "false",
+				AnnotationAgentPrePopulateOnly: "true",
+			},
+			wantPrePopulateOnly: true,
+		},
+		"AC5 native and pre-populate-only with pre-populate false": {
+			annotations: map[string]string{
+				AnnotationAgentNativeSidecar:   "true",
+				AnnotationAgentPrePopulateOnly: "true",
+				AnnotationAgentPrePopulate:     "false",
+			},
+			wantNative: true,
+			wantErr:    AnnotationAgentNativeSidecar + " requires " + AnnotationAgentPrePopulate + " to be true",
+		},
+		"AC5 native with pre-populate false": {
+			annotations: map[string]string{
+				AnnotationAgentNativeSidecar: "true",
+				AnnotationAgentPrePopulate:   "false",
+			},
+			wantNative: true,
+			wantErr:    AnnotationAgentNativeSidecar + " requires " + AnnotationAgentPrePopulate + " to be true",
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			agent := newGoldenAgent(t, tc.annotations)
+			assert.Equal(t, tc.wantNative, agent.NativeSidecar)
+			assert.Equal(t, tc.wantPrePopulateOnly, agent.PrePopulateOnly)
+			if tc.wantErr == "" {
+				assert.NoError(t, agent.Validate())
+				return
+			}
+			assert.EqualError(t, agent.Validate(), tc.wantErr)
+		})
+	}
+}
+
+func TestNativeSidecarPrePopulateOnlyConfig(t *testing.T) {
+	render := func(t *testing.T, annotations map[string]string) map[string]any {
+		t.Helper()
+		agent := newGoldenAgent(t, annotations)
+		raw, err := agent.newConfig(false)
+		require.NoError(t, err)
+		var cfg map[string]any
+		require.NoError(t, json.Unmarshal(raw, &cfg))
+		return cfg
+	}
+
+	t.Run("AC3 cache-enable config equals native alone", func(t *testing.T) {
+		native := render(t, map[string]string{
+			AnnotationAgentNativeSidecar: "true",
+			AnnotationAgentCacheEnable:   "true",
+		})
+		combined := render(t, map[string]string{
+			AnnotationAgentNativeSidecar:   "true",
+			AnnotationAgentPrePopulateOnly: "true",
+			AnnotationAgentCacheEnable:     "true",
+		})
+		require.Equal(t, native, combined)
+	})
+}
+
+func TestPatchNativeSidecarIgnoresPrePopulateOnly(t *testing.T) {
+	t.Run("AC2 single native sidecar, no init-only agent", func(t *testing.T) {
+		pod, _ := patchedPod(t, nativeOn(map[string]string{AnnotationAgentPrePopulateOnly: "true"}), nil)
+
+		require.Equal(t, []string{"vault-agent"}, containerNames(pod.Spec.InitContainers))
+		require.Equal(t, []string{"app", "other"}, containerNames(pod.Spec.Containers))
+		agentContainer := findContainer(t, pod.Spec.InitContainers, "vault-agent")
+		requireNativeShape(t, agentContainer)
+		requireProbeCommand(t, agentContainer, "/home/vault/.vault-token", "/vault/secrets/db")
 	})
 }

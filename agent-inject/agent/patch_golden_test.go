@@ -97,6 +97,7 @@ func TestPatchGolden(t *testing.T) {
 		name           string
 		annotations    map[string]string
 		initContainers []corev1.Container
+		fixture        string
 	}{
 		{name: "default"},
 		{
@@ -160,6 +161,14 @@ func TestPatchGolden(t *testing.T) {
 			annotations: map[string]string{AnnotationAgentNativeSidecar: "true"},
 		},
 		{
+			name: "AC2 native-sidecar pre-populate-only",
+			annotations: map[string]string{
+				AnnotationAgentNativeSidecar:   "true",
+				AnnotationAgentPrePopulateOnly: "true",
+			},
+			fixture: "native-sidecar",
+		},
+		{
 			name: "native-sidecar-init-first",
 			annotations: map[string]string{
 				AnnotationAgentNativeSidecar: "true",
@@ -185,8 +194,12 @@ func TestPatchGolden(t *testing.T) {
 			require.NoError(t, err)
 
 			got := normalisePatch(t, patch)
-			fixture := filepath.Join("testdata", "patch-golden", tt.name+".json")
-			if *updateGolden {
+			owned := tt.fixture == ""
+			if owned {
+				tt.fixture = tt.name
+			}
+			fixture := filepath.Join("testdata", "patch-golden", tt.fixture+".json")
+			if *updateGolden && owned {
 				require.NoError(t, os.MkdirAll(filepath.Dir(fixture), 0o755))
 				require.NoError(t, os.WriteFile(fixture, got, 0o644))
 				return
